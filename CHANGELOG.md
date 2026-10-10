@@ -1,0 +1,38 @@
+# **CHANGELOG**  
+
+## v0.1.0  
+**Commit Date:** 5 October 2026  
+**Description:**  
+[Initial Commit] Adding Basic files for refinement in the future. Gemini Code contains bugs that needs to be fixed.  
+**Additional Remarks:**  
+Do **NOT** use this version for live testing!  
+
+## v0.1.1  
+**Commit Date:** 5 October 2026  
+**Description:**  
+[Bug Fix] Fixed formatting issues in CHANGELOG.md and README.md files.  
+**Additional Remarks:**  
+Do **NOT** use this version for live testing!  
+
+## v0.2.0   
+**Commit Date:** 5 October 2026  
+**Description:**  
+[New Files]  
+chopeWash_demo.py - for demo purposes only  
+chopeWash.py - Intended to be the deployed code  
+[Implementation Changes]  
+Fixed code implentation with the help of Gemini Pro 3.1  
+
+## v0.3.0  
+**Commit Date:** 10 October 2026  
+**Description:**  
+[New Feature]  
+Added a 3 strike system for queue users to prevent system abuse  
+
+## v0.4.0  
+**Commit Date:** 11 October 2026  
+**Description:**  
+[New Feature]  
+Added Adafruit Functionality for ESP32 & SwitchBot Control  
+[New File]  
+Added chopeWash_ESP32.ino for ESP32 Code  
