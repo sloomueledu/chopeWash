@@ -12,6 +12,62 @@
 #include "esp_wpa2.h"
 #endif
 
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET    -1
+#define SCREEN_ADDRESS 0x3C  // Default I2C address for 0.96" OLED (try 0x3D if blank)
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+// Global status strings
+String oledStatus = "Booting...";
+String oledCommand = "None";
+String oledMachine = "Idle";
+
+void updateOLED(String status, String machine, String cmd) {
+  oledStatus = status;
+  oledMachine = machine;
+  oledCommand = cmd;
+
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+
+  // Header Title
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.print("--- chopeWash Bridge ---");
+  display.drawLine(0, 10, 127, 10, SSD1306_WHITE);
+
+  // Wi-Fi / Broker Status
+  display.setCursor(0, 14);
+  display.print("Net: ");
+  display.println(oledStatus);
+
+  // Machine Actuated
+  display.setCursor(0, 28);
+  display.print("Unit: ");
+  display.println(oledMachine);
+
+  // Last Command / Feedback
+  display.setCursor(0, 42);
+  display.print("Cmd: ");
+  display.println(oledCommand);
+
+  // IP Address footprint at bottom
+  display.setCursor(0, 56);
+  if (WiFi.status() == WL_CONNECTED) {
+    display.print("IP: ");
+    display.println(WiFi.localIP().toString());
+  } else {
+    display.println("IP: Disconnected");
+  }
+
+  display.display();
+}
+
 // ==========================================
 // ADAFRUIT IO & MQTT CONFIGURATION
 // ==========================================
@@ -120,6 +176,15 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   for (unsigned int i = 0; i < length; i++) {
     userId += (char)payload[i];
   }
+
+  String targetMachine = "Unknown";
+  if (topicStr.endsWith("washera")) targetMachine = "Washer A";
+  else if (topicStr.endsWith("washerb")) targetMachine = "Washer B";
+  else if (topicStr.endsWith("dryera")) targetMachine = "Dryer A";
+  else if (topicStr.endsWith("dryerb")) targetMachine = "Dryer B";
+
+  // Reflect command received on OLED
+  updateOLED("Active (TLS)", targetMachine, "UID: " + userId);
   
   Serial.println("Inbound command on: " + topicStr + " for UID: " + userId);
   String replyMsg = "";
@@ -140,14 +205,25 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     if (triggerSwitchBot(MAC_DRYER_B)) replyMsg = userId + ":✅ Dryer B started successfully!";
     else replyMsg = userId + ":❌ Error: Could not actuate Dryer B.";
   }
+  updateOLED("Active (TLS)", targetMachine, "UID: " + userId);
 
-  if (replyMsg.length() > 0) {
+ if (replyMsg.length() > 0) {
     mqttClient.publish(feedback_topic, replyMsg.c_str());
+    updateOLED("Active (TLS)", targetMachine, "Actuation OK!");
   }
 }
 
 void setup() {
   Serial.begin(115200);
+
+  // Initialize I2C OLED
+  if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+    Serial.println("SSD1306 allocation failed. Check I2C wiring.");
+  } else {
+    display.clearDisplay();
+    updateOLED("Connecting WiFi...", "None", "Standby");
+  }
+
   BLEDevice::init("ESP32_Laundry_Bridge");
 
   WiFi.disconnect(true);
@@ -171,6 +247,7 @@ void setup() {
     delay(500);
     Serial.print(".");
   }
+  updateOLED("WiFi OK | Sync NTP", "None", "Waiting TLS");
   Serial.println("\nWi-Fi Connected! IP: " + WiFi.localIP().toString());
 
   // 1. Sync clock for X.509 date validity checks

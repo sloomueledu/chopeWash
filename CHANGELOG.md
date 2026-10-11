@@ -52,7 +52,7 @@
 [New File]  
 * Added chopeWash_ESP32.ino for ESP32 Code  
 
-## v0.4.1
+## v0.5.0
 **Commit Date:** 11 October 2026
 
 **Description**
@@ -71,3 +71,11 @@
 
 [File Update]  
 * Updated requirements.txt  
+
+## v1.0.0
+**Commit Date:** 12 October 2026
+
+**Description**
+
+[New Features]
+* Added OLED Display Capabilities to the ESP32   
