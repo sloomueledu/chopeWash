@@ -74,7 +74,7 @@ class chopeWashBot:
         self.mqtt_user = os.getenv("ADAFRUIT_IO_USERNAME")
         self.mqtt_password = os.getenv("ADAFRUIT_IO_KEY")
         
-        self.mqtt_client = mqtt.Client()
+        self.mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         self.mqtt_client.username_pw_set(self.mqtt_user, self.mqtt_password)
         self.mqtt_client.tls_set(tls_version=ssl.PROTOCOL_TLS)
         self.mqtt_client.on_connect = self.on_mqtt_connect
@@ -83,12 +83,12 @@ class chopeWashBot:
     # ==========================================
     # MQTT NETWORK LAYER (TWO-WAY)
     # ==========================================
-    def on_mqtt_connect(self, client, userdata, flags, rc):
-        if rc == 0:
+    def on_mqtt_connect(self, client, userdata, flags, reason_code, properties):
+        if reason_code == 0:
             logging.info("Connected to Adafruit IO for two-way MQTT!")
             client.subscribe(f"{self.mqtt_user}/feeds/chopewash-feedback")
         else:
-            logging.error(f"Failed to connect to MQTT, return code {rc}")
+            logging.error(f"Failed to connect to MQTT, return code {reason_code}")
 
     def on_mqtt_message(self, client, userdata, msg):
         payload = msg.payload.decode()
