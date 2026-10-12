@@ -79,3 +79,12 @@
 
 [New Features]
 * Added OLED Display Capabilities to the ESP32   
+
+## v1.1.0  
+**Commit Date:** 12 October 2026  
+
+**Description:**  
+
+[New Feature]  
+* Updated the messages to inform users to refresh their dashbaord.  
+* Messages also refelcts which washer/dryer they are assinged to.
