@@ -424,7 +424,7 @@ class chopeWashBot:
                 queue_item["turn_expiry"] = now + timedelta(seconds=self.turn_grace_period)
                 queue_item["assigned_machine"] = assigned_washer
                 
-                msg = f"👀 **Washer {washer_label} is now available!**\nPlease Refresh Your Dashboard & Press '▶️ START WASHER NOW'. You have {time_display} left before you will receive a strike!"
+                msg = f"👀 **Washer {washer_label} is now available!**\nPlease Refresh Your Dashboard & Press '▶️ START WASHER NOW'.\n\nYou have {time_display} left before you will receive a strike!"
                 
                 context.job_queue.run_once(
                     self.enforce_queue_turn, 
@@ -455,7 +455,7 @@ class chopeWashBot:
                 queue_item["turn_expiry"] = now + timedelta(seconds=self.turn_grace_period)
                 queue_item["assigned_machine"] = assigned_dryer
                 
-                msg = f"👀 **Dryer {dryer_label} is now available!**\nPlease Refresh Your Dashboard & Press '▶️ START DRYER NOW'. You have {time_display} left before you will receive a strike!"
+                msg = f"👀 **Dryer {dryer_label} is now available!**\nPlease Refresh Your Dashboard & Press '▶️ START DRYER NOW'.\n\nYou have {time_display} left before you will receive a strike!"
                 
                 context.job_queue.run_once(
                     self.enforce_queue_turn, 
@@ -904,7 +904,7 @@ class chopeWashBot:
             self.washer_pending_collection[user_id] = cycle_data
             
             context.job_queue.run_once(self.enforce_collection_timeout, self.grace_period, data={"user_id": user_id, "machine_type": "washer"})
-            msg = "👕 **Washer Cycle Complete!**\nPlease collect your clothes within the next **15 minutes**. Press '✅ I have collected my clothes!' on your dashboard when done."
+            msg = "👕 **Washer Cycle Complete!**\nPlease collect your clothes within the next **15 minutes**.\n\nPress '✅ I have collected my clothes!' on your dashboard when done."
             try: await context.bot.send_message(chat_id=user_id, text=msg, parse_mode="Markdown")
             except Forbidden: pass
             
@@ -915,7 +915,7 @@ class chopeWashBot:
             self.dryer_pending_collection[user_id] = cycle_data
             
             context.job_queue.run_once(self.enforce_collection_timeout, self.grace_period, data={"user_id": user_id, "machine_type": "dryer"})
-            msg = "🔥 **Dryer Cycle Complete!**\nPlease collect your clothes within the next **15 minutes**. Press '✅ I have collected my clothes!' on your dashboard when done."
+            msg = "🔥 **Dryer Cycle Complete!**\nPlease collect your clothes within the next **15 minutes**.\n\nPress '✅ I have collected my clothes!' on your dashboard when done."
             try: await context.bot.send_message(chat_id=user_id, text=msg, parse_mode="Markdown")
             except Forbidden: pass
 
