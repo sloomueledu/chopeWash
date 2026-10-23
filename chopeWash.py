@@ -39,16 +39,16 @@ class chopeWashBot:
         self.soft_bans_bookings = [] 
         self.soft_bans_fcfs_queue = []
         self.user_strikes = {} # Format: {user_id: strike_count}
-        self.turn_grace_period = 900 # Live: 15 minutes (900s) to claim an open machine
+        self.turn_grace_period = 600 # Live: 10 minutes (600s) to claim an open machine
 
         # --- Machine Tracking ---
         # 0 - Washer A | 1 - Washer B | 2 - Dryer A | 3 - Dryer B
         self.available_machines = [0, 1, 2, 3]
 
-        # --- System Settings (LIVE Config) ---
-        self.grace_period = 900 # Live: 15 minutes
-        self.machine_forgot_ban = 48 # Hours
-        self.forgot_washer_and_dryer = 72 # Hours
+        # --- System Settings (Live Config) ---
+        self.grace_period = 900 #Live: 15 minutes
+        self.machine_forgot_ban = 168 # Hours
+        self.forgot_washer_and_dryer = 168 # Hours
         self.missed_queue_ban = 2 # Hours
         self.cycle_timer = 2100 # Default Wash Time: 35 minutes (2100s)
         self.bugs_URL = "https://forms.gle/vxBhDgbCQDFo4ULL6"
@@ -136,24 +136,33 @@ class chopeWashBot:
     # ==========================================
     # HELPERS & DASHBOARD UI GENERATOR
     # ==========================================
-    def is_user_banned(self, user_id: int) -> bool:
+    def is_user_banned(self, user_id: int, system_type: str) -> bool:
         now = datetime.now()
         
-        # Check FCFS bans
-        active_fcfs_ban = next((b for b in self.soft_bans_fcfs_queue if b["id"] == user_id), None)
-        if active_fcfs_ban:
-            if now < active_fcfs_ban["expires"]:
-                return True
-            self.soft_bans_fcfs_queue.remove(active_fcfs_ban)
+        if system_type == "Queue":
+            active_fcfs_ban = next((b for b in self.soft_bans_fcfs_queue if b["id"] == user_id), None)
+            if active_fcfs_ban:
+                if now < active_fcfs_ban["expires"]:
+                    return True
+                self.soft_bans_fcfs_queue.remove(active_fcfs_ban)
 
-        # Check Timeslot bans
-        active_booking_ban = next((b for b in self.soft_bans_bookings if b["id"] == user_id), None)
-        if active_booking_ban:
-            if now < active_booking_ban["expires"]:
-                return True
-            self.soft_bans_bookings.remove(active_booking_ban)
+        elif system_type == "Time Slot":
+            active_booking_ban = next((b for b in self.soft_bans_bookings if b["id"] == user_id), None)
+            if active_booking_ban:
+                if now < active_booking_ban["expires"]:
+                    return True
+                self.soft_bans_bookings.remove(active_booking_ban)
 
         return False
+
+    def get_ban_expiry_str(self, user_id: int, system_type: str):
+        now = datetime.now()
+        ban_list = self.soft_bans_fcfs_queue if system_type == "Queue" else self.soft_bans_bookings
+        active_ban = next((b for b in ban_list if b["id"] == user_id), None)
+        
+        if active_ban and now < active_ban["expires"]:
+            return active_ban["expires"].strftime("%d %b %I:%M %p")
+        return None
     
     def has_active_booking(self, user_id: int) -> bool:
         """Checks if a user already has an active, unstarted booking."""
@@ -222,7 +231,7 @@ class chopeWashBot:
             rem_sec = max(0, int((pending["expiry_time"] - now).total_seconds()))
             rem_min, rem_s = divmod(rem_sec, 60)
             
-            text += f"⚠️ **ACTION REQUIRED:**\nWasher {machine_id} cycle complete. Please collect your clothes!\n⏳ **Time left to claim:** {rem_min}m {rem_s}s\n\n"
+            text += f"⚠️ **ACTION REQUIRED:**\nWasher {machine_id} cycle complete. Please refresh your Dashboard and select '✅ I have collected my clothes!'\n⏳ **Time left to claim:** {rem_min}m {rem_s}s\n\n"
             buttons.insert(0, [InlineKeyboardButton("✅ I have collected my clothes!", callback_data="collected_washer")])
             
         elif user_id in self.dryer_pending_collection: 
@@ -231,7 +240,7 @@ class chopeWashBot:
             rem_sec = max(0, int((pending["expiry_time"] - now).total_seconds()))
             rem_min, rem_s = divmod(rem_sec, 60)
             
-            text += f"⚠️ **ACTION REQUIRED:**\nDryer {machine_id} cycle complete. Please collect your clothes!\n⏳ **Time left to claim:** {rem_min}m {rem_s}s\n\n"
+            text += f"⚠️ **ACTION REQUIRED:**\nDryer {machine_id} cycle complete. Please refresh your Dashboard & select '✅ I have collected my clothes!'\n⏳ **Time left to claim:** {rem_min}m {rem_s}s\n\n"
             buttons.insert(0, [InlineKeyboardButton("✅ I have collected my clothes!", callback_data="collected_dryer")])
 
         # --- 4. BOOKING STATUS ---
@@ -246,69 +255,60 @@ class chopeWashBot:
                 
                 try:
                     slot_time = datetime.strptime(slot, "%Y-%m-%d %H:%M")
-                    if abs((now - slot_time).total_seconds()) <= 900:
+                    time_diff = (now - slot_time).total_seconds()
+                    
+                    if 0 <= time_diff <= 600:
                         if len(free_washers) > 0:
                             assigned = "A" if free_washers[0] == 0 else "B"
                             text += f"  🟢 **Ready!** Head down to **Washer {assigned}** now.\n"
                             booking_start = True
                         else:
                             text += "  ⏳ **Starting soon.** Waiting for a machine to clear...\n"
+                    elif time_diff < 0 and abs(time_diff) <= 900:
+                        text += f"  ⏳ **Too early.** You can start your machine at exactly {slot_time.strftime('%H:%M')}.\n"
                 except ValueError:
                     pass
-        else:
-            text += "• _No upcoming reservations._\n\n"
 
-        # --- 5. QUEUING STATUS ---
-        text += "**🏃‍♂️ Queuing Status:**\n"
+        # --- 5. QUEUING STATUS (Replace the entire section) ---
+        text += "\n**🏃‍♂️ Live Queue Status:**\n"
+        text += f"• Waiting for Washers: {len(self.washer_fcfs_queue)} person(s)\n"
+        text += f"• Waiting for Dryers: {len(self.dryer_fcfs_queue)} person(s)\n"
+        
         w_queue_entry = next((item for item in self.washer_fcfs_queue if item["id"] == user_id), None)
         d_queue_entry = next((item for item in self.dryer_fcfs_queue if item["id"] == user_id), None)
         
         if w_queue_entry:
             pos = self.washer_fcfs_queue.index(w_queue_entry) + 1
-            text += f"• **Washer Queue:** #{pos} of {len(self.washer_fcfs_queue)}\n"
+            text += f"\n**> Your Position:** #{pos} (Washer)\n"
             buttons.append([InlineKeyboardButton("⏸ Pause Spot", callback_data="fcfs_pause")])
             buttons.append([InlineKeyboardButton("🚪 Leave Line", callback_data="fcfs_leave")])
             if pos == 1: 
                 if fcfs_washer_ready:
-                    # FIX: Change free_washers[-1] to free_washers[0]
                     assigned = "A" if free_washers[0] == 0 else "B"
                     text += f"  🟢 **It's your turn!** Head to **Washer {assigned}**.\n"
-                    
-                    if "turn_expiry" in w_queue_entry:
-                        rem_sec = max(0, int((w_queue_entry["turn_expiry"] - now).total_seconds()))
-                        rem_min, rem_s = divmod(rem_sec, 60)
-                        text += f"  ⏳ **Time to start:** {rem_min}m {rem_s}s\n"
-
                     booking_start = True 
                 else:
-                    text += "  ⏳ **You are next!** Waiting for a washer to clear (upcoming reservations have priority)...\n"
+                    text += "  ⏳ **You are next!** Waiting for a washer to clear...\n"
                     
         elif d_queue_entry:
             pos = self.dryer_fcfs_queue.index(d_queue_entry) + 1
-            text += f"• **Dryer Queue:** #{pos} of {len(self.dryer_fcfs_queue)}\n"
+            text += f"\n**> Your Position:** #{pos} (Dryer)\n"
             buttons.append([InlineKeyboardButton("⏸ Pause Spot", callback_data="fcfs_pause")])
             buttons.append([InlineKeyboardButton("🚪 Leave Line", callback_data="fcfs_leave")])
             if pos == 1:
                 if fcfs_dryer_ready:
-                    # FIX: Change free_dryers[-1] to free_dryers[0]
                     assigned = "A" if free_dryers[0] == 2 else "B"
                     text += f"  🟢 **It's your turn!** Head to **Dryer {assigned}**.\n"
-                    
-                    if "turn_expiry" in d_queue_entry:
-                        rem_sec = max(0, int((d_queue_entry["turn_expiry"] - now).total_seconds()))
-                        rem_min, rem_s = divmod(rem_sec, 60)
-                        text += f"  ⏳ **Time to start:** {rem_min}m {rem_s}s\n"
-
                     booking_start = True
                 else:
-                    text += "  ⏳ **You are next!** Waiting for a dryer to clear (VIP transition has priority)...\n"
+                    text += "  ⏳ **You are next!** Waiting for a dryer to clear...\n"
 
         elif user_id in self.paused_users:
             rem_mins = max(0, int((self.paused_users[user_id]["expires"] - now).total_seconds() // 60))
-            text += f"• **State:** ⏸ Paused ({rem_mins}m remaining)\n"
+            text += f"\n**> Your Position:** ⏸ Paused ({rem_mins}m remaining)\n"
             buttons.append([InlineKeyboardButton("▶️ Resume Line", callback_data="fcfs_resume")])
         else:
-            text += "• _Not currently in any live queue._\n"
+            text += "\n_> You are not currently in any live queue._\n"
 
         # --- 6. VIP DRYER TRANSITION ---
         in_dryer_transition = next((u for u in self.dryer_pending_start if u["id"] == user_id), None)
@@ -324,11 +324,17 @@ class chopeWashBot:
         text += f"\n🔧 **Queue Hardware Availability:**\n"
         text += f"• Washers Available: {queue_washers_avail} | Dryers Available: {queue_dryers_avail}\n"
 
-        is_banned = self.is_user_banned(user_id)
+        queue_ban_expiry = self.get_ban_expiry_str(user_id, "Queue")
+        book_ban_expiry = self.get_ban_expiry_str(user_id, "Time Slot")
 
-        if is_banned and not in_dryer_transition:
-            text += "\n🚫 **Account Suspended:** You are currently banned from starting new laundry."
-        elif booking_start and not is_running:
+        if queue_ban_expiry and book_ban_expiry and not in_dryer_transition:
+            text += f"\n🚫 **Account Suspended:** Banned from Queue (until {queue_ban_expiry}) and Bookings (until {book_ban_expiry})."
+        elif queue_ban_expiry and not in_dryer_transition:
+            text += f"\n🚫 **Queue Suspended:** You are banned from the Live Queue until {queue_ban_expiry}."
+        elif book_ban_expiry and not in_dryer_transition:
+            text += f"\n🚫 **Booking Suspended:** You are banned from Bookings until {book_ban_expiry}."
+
+        if booking_start and not is_running:
             if (user_bookings and len(free_washers) > 0) or (w_queue_entry and fcfs_washer_ready):
                 buttons.insert(0, [InlineKeyboardButton("▶️ START WASHER NOW", callback_data="start_washer")])
             elif (in_dryer_transition and len(free_dryers) > 0) or (d_queue_entry and fcfs_dryer_ready):
@@ -367,7 +373,7 @@ class chopeWashBot:
             user_data = target_queue.pop(0)
             new_strike_count = self.user_strikes.get(user_id, 0) + 1
             user_data.pop("turn_expiry", None)
-            
+
             if new_strike_count >= 3:
                 reason = f"You failed to start the {machine_type} within 5 minutes."
             else:
@@ -417,26 +423,60 @@ class chopeWashBot:
                                     and 0 < (datetime.strptime(time_str, "%Y-%m-%d %H:%M") - now).total_seconds() / 60.0 <= 60)
             
             if len(free_washers) > upcoming_bookings:
-                # ⬇️ ADD THIS LINE to save the expiration time for the dashboard ⬇️
-                self.washer_fcfs_queue[0]["turn_expiry"] = now + timedelta(seconds=self.turn_grace_period)
+                assigned_washer = free_washers.pop(0)
+                washer_label = "A" if assigned_washer == 0 else "B"
                 
-                msg = f"👀 **A washer is now available!**\nYou have {time_display} to press START, or you will receive a strike!"
-                context.job_queue.run_once(self.enforce_queue_turn, self.turn_grace_period, data={"user_id": next_user, "machine_type": "washer"})
-                try: await context.bot.send_message(chat_id=next_user, text=msg, parse_mode="Markdown")
-                except Exception: pass
+                queue_item = self.washer_fcfs_queue[0]
+                queue_item["turn_expiry"] = now + timedelta(seconds=self.turn_grace_period)
+                queue_item["assigned_machine"] = assigned_washer
+                
+                msg = f"👀 **Washer {washer_label} is now available!**\nPlease Refresh Your Dashboard & Press '▶️ START WASHER NOW'.\n\nYou have {time_display} left before you will receive a strike!"
+                
+                context.job_queue.run_once(
+                    self.enforce_queue_turn, 
+                    self.turn_grace_period, 
+                    data={
+                        "user_id": next_user, 
+                        "machine_type": "washer", 
+                        "machine_id": assigned_washer
+                    }
+                )
+                
+                try:
+                    await context.bot.send_message(chat_id=next_user, text=msg, parse_mode="Markdown")
+                except Exception:
+                    pass
 
         elif machine_type == "dryer" and len(self.dryer_fcfs_queue) > 0:
             next_user = self.dryer_fcfs_queue[0]["id"]
-            vip_dryer_waitlist = sum(1 for u in self.dryer_pending_start if u["id"] != next_user)
-            
-            if len(free_dryers) > vip_dryer_waitlist:
-                # ⬇️ ADD THIS LINE to save the expiration time for the dashboard ⬇️
-                self.dryer_fcfs_queue[0]["turn_expiry"] = now + timedelta(seconds=self.turn_grace_period)
+            upcoming_bookings = sum(1 for time_str, d in self.timeslot_bookings.items()
+                                    if d["user"] != next_user and not d.get("started")
+                                    and 0 < (datetime.strptime(time_str, "%Y-%m-%d %H:%M") - now).total_seconds() / 60.0 <= 60)
+
+            if len(free_dryers) > upcoming_bookings:
+                assigned_dryer = free_dryers.pop(0)
+                dryer_label = "A" if assigned_dryer == 2 else "B"
                 
-                msg = f"🔥 **A dryer is now available!**\nYou have {time_display} to press START, or you will receive a strike!"
-                context.job_queue.run_once(self.enforce_queue_turn, self.turn_grace_period, data={"user_id": next_user, "machine_type": "dryer"})
-                try: await context.bot.send_message(chat_id=next_user, text=msg, parse_mode="Markdown")
-                except Exception: pass
+                queue_item = self.dryer_fcfs_queue[0]
+                queue_item["turn_expiry"] = now + timedelta(seconds=self.turn_grace_period)
+                queue_item["assigned_machine"] = assigned_dryer
+                
+                msg = f"👀 **Dryer {dryer_label} is now available!**\nPlease Refresh Your Dashboard & Press '▶️ START DRYER NOW'.\n\nYou have {time_display} left before you will receive a strike!"
+                
+                context.job_queue.run_once(
+                    self.enforce_queue_turn, 
+                    self.turn_grace_period, 
+                    data={
+                        "user_id": next_user, 
+                        "machine_type": "dryer", 
+                        "machine_id": assigned_dryer
+                    }
+                )
+                
+                try:
+                    await context.bot.send_message(chat_id=next_user, text=msg, parse_mode="Markdown")
+                except Exception:
+                    pass
 
     # ==========================================
     # TELEGRAM HANDLERS
@@ -467,7 +507,7 @@ class chopeWashBot:
 
         # --- INTERCEPT: BOOKING INTENT ---
         elif data == "flow_book":
-            if self.is_user_banned(user_id):
+            if self.is_user_banned(user_id, "Time Slot"):
                 await query.answer("🚫 You are currently banned from booking timeslots.", show_alert=True)
                 return
             
@@ -489,7 +529,7 @@ class chopeWashBot:
         # --- INTERCEPT: FCFS INTENT ---
         elif data == "flow_fcfs":
             # --- INTERCEPT BANNED USERS ---
-            if self.is_user_banned(user_id):
+            if self.is_user_banned(user_id, "Queue"):
                 await query.answer("🚫 You are currently banned from joining the queue.", show_alert=True)
                 return
                     
@@ -545,7 +585,7 @@ class chopeWashBot:
                 else:
                     if current_time >= datetime.now():
                         slot_buttons.append(InlineKeyboardButton(f"🟩 {display}", callback_data=f"book_{s_str}"))
-                    current_time += timedelta(minutes=45)
+                    current_time += timedelta(minutes=60)
 
             buttons = [slot_buttons[i:i + 3] for i in range(0, len(slot_buttons), 3)]
             buttons.append([InlineKeyboardButton("🔙 Dates", callback_data="flow_book")])
@@ -703,9 +743,16 @@ class chopeWashBot:
 
         # --- ACTIONS: START HARDWARE ---
         elif data == "start_washer":
-            # 1. Reject if banned
-            if self.is_user_banned(user_id):
-                await query.answer("🚫 You are currently banned from starting new wash cycles.", show_alert=True)
+            # 0. Define state variables FIRST before doing any checks
+            is_first_in_queue = len(self.washer_fcfs_queue) > 0 and self.washer_fcfs_queue[0]["id"] == user_id
+            active_slot = next((slot for slot, d in self.timeslot_bookings.items() if d["user"] == user_id and not d.get("started")), None)
+
+            # 1. Reject if banned in the specific system they are trying to use
+            if is_first_in_queue and self.is_user_banned(user_id, "Queue"):
+                await query.answer("🚫 You are banned from starting queue cycles.", show_alert=True)
+                return
+            if active_slot and self.is_user_banned(user_id, "Time Slot"):
+                await query.answer("🚫 You are banned from starting booked cycles.", show_alert=True)
                 return
 
             # 2. Prevent Double-Tap Hardware Blackhole
@@ -714,14 +761,24 @@ class chopeWashBot:
                 return
 
             # 3. Verify user is authorized (#1 in queue or has an active booking)
-            is_first_in_queue = len(self.washer_fcfs_queue) > 0 and self.washer_fcfs_queue[0]["id"] == user_id
-            active_slot = next((slot for slot, d in self.timeslot_bookings.items() if d["user"] == user_id and not d.get("started")), None)
-            
             if not is_first_in_queue and not active_slot:
                 await query.answer("⚠️ You do not have an active turn or reservation.", show_alert=True)
                 return
 
             now = datetime.now()
+
+            # --- BLOCK EARLY/LATE STARTS FOR BOOKINGS ---
+            if active_slot and not is_first_in_queue:
+                slot_time = datetime.strptime(active_slot, "%Y-%m-%d %H:%M")
+                seconds_early = (slot_time - now).total_seconds()
+                
+                if seconds_early > 0:
+                    await query.answer(f"⏳ Too early! Your slot starts at {slot_time.strftime('%H:%M')}.", show_alert=True)
+                    return
+                elif seconds_early < -600:
+                    await query.answer("🚫 You missed your 10-minute starting window.", show_alert=True)
+                    return
+                
             upcoming_bookings = sum(
                 1 for time_str, d in self.timeslot_bookings.items() 
                 if d["user"] != user_id 
@@ -733,15 +790,18 @@ class chopeWashBot:
             
             if len(free_washers) > upcoming_bookings:
                 assigned_machine = free_washers[0]
-                self.available_machines.remove(assigned_machine)
                 
                 if is_first_in_queue:
                     entry = self.washer_fcfs_queue.pop(0)
+                    assigned_machine = entry.get("assigned_machine", free_washers[0])
                     intent, system = entry.get("intent"), entry.get("system")
                 else:
+                    assigned_machine = free_washers[0]
                     intent = self.timeslot_bookings[active_slot]["intent"]
                     system = "Time Slot"
-                    self.timeslot_bookings[active_slot]["started"] = True 
+                    self.timeslot_bookings[active_slot]["started"] = True
+
+                self.available_machines.remove(assigned_machine)
 
                 await self.trigger_switchbot_mqtt(assigned_machine, user_id)
                 self.washer_active_cycles[user_id] = {
@@ -768,9 +828,10 @@ class chopeWashBot:
             transition_entry = next((u for u in self.dryer_pending_start if u["id"] == user_id), None)
             is_first_in_queue = len(self.dryer_fcfs_queue) > 0 and self.dryer_fcfs_queue[0]["id"] == user_id
 
-            # 2. Check Ban: allow ONLY if finishing an active transition (Approach B)
-            if self.is_user_banned(user_id) and not transition_entry:
-                await query.answer("🚫 You are banned from starting dryers. Only active transfer cycles are permitted.", show_alert=True)
+            # 2. Check Ban: allow ONLY if finishing an active transition
+            sys_check = transition_entry.get("system", "Queue") if transition_entry else "Queue"
+            if self.is_user_banned(user_id, sys_check) and not transition_entry:
+                await query.answer("🚫 You are banned from starting dryers in this system.", show_alert=True)
                 return
 
             if not transition_entry and not is_first_in_queue:
@@ -836,9 +897,23 @@ class chopeWashBot:
         self.timeslot_bookings[slot_str] = {"user": user_id, "intent": intent, "dry_time": dry_time, "started": False}
         
         try:
-            delay = (datetime.strptime(slot_str, "%Y-%m-%d %H:%M") - datetime.now()).total_seconds() - 900
-            if delay > 0:
-                context.job_queue.run_once(self.booking_reminder_job, delay, data={"user_id": user_id, "slot_str": slot_str})
+            slot_time = datetime.strptime(slot_str, "%Y-%m-%d %H:%M")
+            now = datetime.now()
+            
+            # T-15 Minute Reminder
+            delay_reminder = (slot_time - now).total_seconds() - 900
+            if delay_reminder > 0:
+                context.job_queue.run_once(self.booking_reminder_job, delay_reminder, data={"user_id": user_id, "slot_str": slot_str})
+            
+            # T+0 Start Notification
+            delay_start = (slot_time - now).total_seconds()
+            if delay_start > 0:
+                context.job_queue.run_once(self.booking_start_job, delay_start, data={"user_id": user_id, "slot_str": slot_str})
+                
+            # T+10 Minute Cutoff Ban
+            delay_cutoff = (slot_time - now).total_seconds() + 600
+            if delay_cutoff > 0:
+                context.job_queue.run_once(self.enforce_booking_turn, delay_cutoff, data={"user_id": user_id, "slot_str": slot_str})
         except Exception:
             pass
         
@@ -854,6 +929,40 @@ class chopeWashBot:
         except Forbidden:
             pass
 
+    async def booking_start_job(self, context: ContextTypes.DEFAULT_TYPE):
+        job_data = context.job.data
+        user_id = job_data["user_id"]
+        slot_str = job_data["slot_str"]
+        
+        # Only notify if the booking still exists and hasn't been started early
+        if slot_str in self.timeslot_bookings:
+            booking = self.timeslot_bookings[slot_str]
+            if booking["user"] == user_id and not booking.get("started"):
+                msg = f"🟢 **Your slot ({slot_str}) starts NOW!**\n\nYou have exactly **10 minutes** to head down and press '▶️ START' on your Dashboard, or your reservation will be forfeited and a 7-day ban applied."
+                try:
+                    await context.bot.send_message(chat_id=user_id, text=msg, parse_mode="Markdown")
+                except Forbidden:
+                    pass
+
+    async def enforce_booking_turn(self, context: ContextTypes.DEFAULT_TYPE):
+        job_data = context.job.data
+        user_id = job_data["user_id"]
+        slot_str = job_data["slot_str"]
+        
+        if slot_str in self.timeslot_bookings:
+            booking = self.timeslot_bookings[slot_str]
+            if booking["user"] == user_id and not booking.get("started"):
+                ban_expiry = datetime.now() + timedelta(hours=168)
+                self.soft_bans_bookings.append({"id": user_id, "expires": ban_expiry})
+                
+                del self.timeslot_bookings[slot_str]
+                
+                msg = f"🚫 **BANNED (Missed Reservation)**\nYou failed to start your machine within the 10-minute grace period for your `{slot_str}` slot.\n\nYou are banned from booking for 7 days (you may still use the Live Queue)."
+                try:
+                    await context.bot.send_message(chat_id=user_id, text=msg, parse_mode="Markdown")
+                except Exception:
+                    pass
+
     async def cycle_completion(self, context: ContextTypes.DEFAULT_TYPE):
         job_data = context.job.data
         user_id = job_data["user_id"]
@@ -867,7 +976,7 @@ class chopeWashBot:
             self.washer_pending_collection[user_id] = cycle_data
             
             context.job_queue.run_once(self.enforce_collection_timeout, self.grace_period, data={"user_id": user_id, "machine_type": "washer"})
-            msg = "👕 **Washer Cycle Complete!**\nPlease collect your clothes within the next **15 minutes**. Press 'Claimed' on your dashboard when done."
+            msg = "👕 **Washer Cycle Complete!**\nPlease collect your clothes within the next **15 minutes**.\n\nPress '✅ I have collected my clothes!' on your dashboard when done."
             try: await context.bot.send_message(chat_id=user_id, text=msg, parse_mode="Markdown")
             except Forbidden: pass
             
@@ -878,7 +987,7 @@ class chopeWashBot:
             self.dryer_pending_collection[user_id] = cycle_data
             
             context.job_queue.run_once(self.enforce_collection_timeout, self.grace_period, data={"user_id": user_id, "machine_type": "dryer"})
-            msg = "🔥 **Dryer Cycle Complete!**\nPlease collect your clothes within the next **15 minutes**. Press 'Claimed' on your dashboard when done."
+            msg = "🔥 **Dryer Cycle Complete!**\nPlease collect your clothes within the next **15 minutes**.\n\nPress '✅ I have collected my clothes!' on your dashboard when done."
             try: await context.bot.send_message(chat_id=user_id, text=msg, parse_mode="Markdown")
             except Forbidden: pass
 
@@ -910,8 +1019,16 @@ class chopeWashBot:
             if intent == "Wash & Dry":
                 # Route both FCFS and Timeslot into dryer_pending_start
                 self.dryer_pending_start.append({"id": user_id, "intent": "Wash & Dry", "system": system, "washer_penalized": penalized})
-                msg = "Please proceed to an available Dryer and press START on your dashboard."
-            
+                
+                # Peek at available hardware to tell them exactly where to go
+                free_dryers = [m for m in self.available_machines if m in [2, 3]]
+                
+                if len(free_dryers) > 0:
+                    dryer_label = "A" if free_dryers[0] == 2 else "B"
+                    msg = f"Please proceed to **Dryer {dryer_label}**. Refresh your Dashboard to press '▶️ START DRYER NOW'."
+                else:
+                    msg = "Please collect your clothes. You are now next in line for a dryer! Refresh your Dashboard to monitor availability."
+                
             await self.notify_next_in_queue(context, "washer")
 
         elif machine_type == "dryer" and user_id in self.dryer_pending_collection:
@@ -938,7 +1055,7 @@ class chopeWashBot:
                 self.soft_bans_fcfs_queue.append({"id": user_id, "expires": ban_expiry})
             
             pickup_window_str = f"{self.grace_period}s" if self.grace_period < 60 else f"{int(self.grace_period // 60)} minutes"
-            ban_notice = f"🚨 **COLLECTION TIME EXPIRED ({ban_hours}h Ban Applied)**\nYou exceeded the {pickup_window_str} pickup window. You are banned from future queues and reservations for {ban_hours} hours.\n\n"
+            ban_notice = f"🚨 **COLLECTION TIME EXPIRED ({int(ban_hours / 24)} Days Ban Applied)**\nYou have exceeded the {pickup_window_str} pickup window. You are banned from future queues and reservations for {int(ban_hours / 24)} Days.\n\n"
             msg = ban_notice + (msg if msg else "Your laundry slot has concluded.")
                     
         if msg:

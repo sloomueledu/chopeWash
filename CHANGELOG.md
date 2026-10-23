@@ -88,3 +88,16 @@
 [New Feature]  
 * Updated the messages to inform users to refresh their dashbaord.  
 * Messages also refelcts which washer/dryer they are assinged to.
+
+## v2.0.0  
+**Commit Date:** 12 October 2026  
+
+**Description:**  
+
+[New Feature]  
+* Added the ability to see Live Queue Status on Dashbaord, even if the user has not yet joined  
+
+[System Change]  
+* Updated Penalty Logic such that User is only banned from a single system for 7 Days  
+* Updated Laundry Booking Slots to 60min intervals  
+* Updated Grace Periods to ensure that the time taken to complete a wash cycle falls inline accordingly   
